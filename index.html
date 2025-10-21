@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Inventory Demand Forecasting</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <!-- Charts & ML -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <!-- Robust CSV parser -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <!-- Optional data.js (supports: const dataset=[...] or window.INVENTORY_DATA=[...] ) -->
+  <script src="data.js" defer></script>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <h1>📦 Inventory Demand Forecasting</h1>
+      <p>Upload your dataset, explore insights, train a GRU/LSTM model in-browser, then forecast & evaluate.</p>
+    </div>
+    <div class="stepper" id="stepper">
+      <div class="step active"><span>1</span><b>Select Data</b></div>
+      <div class="divider"></div>
+      <div class="step"><span>2</span><b>EDA</b></div>
+      <div class="divider"></div>
+      <div class="step"><span>3</span><b>Model & Train</b></div>
+      <div class="divider"></div>
+      <div class="step"><span>4</span><b>Forecast & Evaluate</b></div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Step 1 -->
+    <section class="card glow" id="cardData">
+      <div class="card-head">
+        <h2>Step 1 — Select Dataset</h2>
+        <span class="badge">Required</span>
+      </div>
+      <div class="row">
+        <div class="col">
+          <label class="lbl">Choose file (CSV/JSON). Or load from data.js if present.</label>
+          <div class="filebox">
+            <input id="fileInput" type="file" accept=".csv,.json" />
+            <button id="btnLoad" class="btn">Load Dataset</button>
+            <button id="btnLoadDataJS" class="btn ghost">Load data.js</button>
+            <button id="btnDemo" class="btn ghost">Use Demo Data</button>
+          </div>
+
+          <div class="grid3">
+            <label>Date Column
+              <select id="dateCol"></select>
+            </label>
+            <label>Target Column
+              <select id="targetCol"></select>
+            </label>
+            <label>Aggregate by Date
+              <select id="aggFunc">
+                <option value="sum">Sum</option>
+                <option value="mean">Mean</option>
+                <option value="last">Last</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="grid3">
+            <label>Store
+              <select id="storeFilter"><option value="__ALL__">All</option></select>
+            </label>
+            <label>Product
+              <select id="productFilter"><option value="__ALL__">All</option></select>
+            </label>
+            <label>Region
+              <select id="regionFilter"><option value="__ALL__">All</option></select>
+            </label>
+          </div>
+
+          <div id="dataSummary" class="summary"></div>
+          <div id="errorBox" class="error hidden"></div>
+        </div>
+      </div>
+      <div id="tableMount"></div>
+    </section>
+
+    <!-- Step 2 -->
+    <section class="card glow disabled" id="cardEDA">
+      <div class="card-head">
+        <h2>Step 2 — Explore Data (EDA)</h2>
+        <span class="badge">Core + Categorical + Region/Product</span>
+      </div>
+      <div class="row">
+        <div class="col controls">
+          <label>Rolling Window
+            <input id="rollingWindow" type="number" min="3" max="60" step="1" value="7"/>
+          </label>
+          <button id="btnEDA" class="btn" disabled>Show EDA</button>
+        </div>
+      </div>
+
+      <!-- Core 4 -->
+      <div class="grid2">
+        <div class="plot"><canvas id="tsChart"></canvas></div>
+        <div class="plot"><canvas id="histChart"></canvas></div>
+        <div class="plot"><canvas id="dowChart"></canvas></div>
+        <div class="plot"><canvas id="acfChart"></canvas></div>
+      </div>
+
+      <!-- Categorical 4 -->
+      <div class="eda-subhead">Categorical Insights</div>
+      <div class="grid2">
+        <div class="plot"><canvas id="cat1Chart"></canvas></div>
+        <div class="plot"><canvas id="cat2Chart"></canvas></div>
+        <div class="plot"><canvas id="cat3Chart"></canvas></div>
+        <div class="plot"><canvas id="cat4Chart"></canvas></div>
+      </div>
+
+      <!-- Region & Product -->
+      <div class="eda-subhead">Region & Product Insights</div>
+      <div class="grid2">
+        <div class="plot"><canvas id="regionTotalsChart"></canvas></div>
+        <div class="plot"><canvas id="topProductsOverallChart"></canvas></div>
+        <div class="plot tall"><canvas id="topProductsByRegionChart"></canvas></div>
+        <div class="plot">
+          <div id="regionTopTable" class="mini-table"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 3 -->
+    <section class="card glow disabled" id="cardModel">
+      <div class="card-head">
+        <h2>Step 3 — Select Model & Train</h2>
+        <span class="badge">Live training</span>
+      </div>
+      <div class="row">
+        <div class="col controls grid6">
+          <label>Model Type
+            <select id="modelType">
+              <option value="GRU">GRU</option>
+              <option value="LSTM">LSTM</option>
+            </select>
+          </label>
+          <label>Sequence Length
+            <input id="seqLen" type="number" min="5" max="180" step="1" value="28"/>
+          </label>
+          <label>Units
+            <input id="units" type="number" min="8" max="256" step="8" value="64"/>
+          </label>
+          <label>Dropout
+            <input id="dropout" type="number" min="0" max="0.8" step="0.05" value="0.2"/>
+          </label>
+          <label>Epochs
+            <input id="epochs" type="number" min="5" max="200" step="1" value="30"/>
+          </label>
+          <label>Batch Size
+            <input id="batch" type="number" min="8" max="512" step="8" value="64"/>
+          </label>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col controls">
+          <button id="btnTrain" class="btn" disabled>Train Model</button>
+          <div id="spinner" class="spinner hidden"></div>
+          <span class="hint">Chronological split 80/20 • Loss=MSE • Optimizer=Adam</span>
+        </div>
+      </div>
+      <div class="plot tall"><canvas id="lossChart"></canvas></div>
+    </section>
+
+    <!-- Step 4 -->
+    <section class="card glow disabled" id="cardForecast">
+      <div class="card-head">
+        <h2>Step 4 — Forecast & Evaluate</h2>
+        <span class="badge">Metrics</span>
+      </div>
+      <div class="row">
+        <div class="col controls">
+          <label>Forecast Horizon
+            <input id="horizon" type="number" min="1" max="180" step="1" value="14"/>
+          </label>
+          <button id="btnPredict" class="btn" disabled>Forecast</button>
+          <button id="btnEvaluate" class="btn ghost" disabled>Evaluate (Test)</button>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="plot tall"><canvas id="predChart"></canvas></div>
+        <div class="metrics" id="metrics">
+          <div class="kpi"><span>Accuracy</span><b id="kpiACC">—</b></div>
+          <div class="kpi"><span>MAE</span><b id="kpiMAE">—</b></div>
+          <div class="kpi"><span>RMSE</span><b id="kpiRMSE">—</b></div>
+          <div class="kpi"><span>MAPE</span><b id="kpiMAPE">—</b></div>
+          <div class="kpi"><span>sMAPE</span><b id="kpiSMAPE">—</b></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card glow">
+      <div class="card-head">
+        <h2>Logs</h2>
+        <span class="badge">Console</span>
+      </div>
+      <div id="log" class="log"></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>Built with <b>TensorFlow.js</b> + <b>Chart.js</b> • Optimized for GitHub Pages</p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
